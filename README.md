@@ -2,7 +2,7 @@
 Maix-EMC: Embedded/Edge Model Convertor, convert NN model for embedded systems
 
 
-Maix-EMC act as **TensorLayer**（[https://github.com/tensorlayer/tensorlayer](https://github.com/tensorlayer/tensorlayer)）plugin, convert TensorLayer Model to kmodel.
+Maix-EMC act as **TensorLayer**（[https://github.com/tensorlayer/tensorlayer](https://github.com/tensorlayer/tensorlayer)）plugin, convert TensorLayer Model to kmodel, see [TensorLayer Model Architecture](https://tensorlayer.readthedocs.io/en/latest/user/get_start_model.html#print-model-information) for more information.
 
 
 **Kmodel** is an flatten embedded Model format, currently used on Maix K210 boards, but it is also possible to run on normal MCU by using corresponding driver.
@@ -11,7 +11,7 @@ Maix-EMC act as **TensorLayer**（[https://github.com/tensorlayer/tensorlayer](h
 We design Maix-EMC as a easy **extendable** frame, you can easily add new layer type or new MCU or new model convertor for it, detail refer to following sections or this post: https://bbs.sipeed.com/t/topic/916
 
 
-![](https://git.kancloud.cn/repos/zepan/note/raw/f60065399babe7b3ce6fde5491b0467bc77a12ac/images/screenshot_1561694286461.png?access-token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJleHAiOjE1NjE3NDc3MzAsImlhdCI6MTU2MTcwNDUzMCwicmVwb3NpdG9yeSI6InplcGFuXC9ub3RlIiwidXNlciI6eyJ1c2VybmFtZSI6InplcGFuIiwibmFtZSI6InplcGFuIiwiZW1haWwiOiJjYWVzYXJAamljbS5jbiIsInRva2VuIjoiMzRjNDZkODFiNzllMTI2YTgwZTIzNzJlNDc2ZjVhNDAiLCJhdXRob3JpemUiOnsicHVsbCI6dHJ1ZSwicHVzaCI6dHJ1ZSwiYWRtaW4iOnRydWV9fX0.AetIzXNoxv3rYkZPTqu1GkJAIN4ZMxRkdY7WW2QjkTQ)
+
 
 ## How to use
 ### install packages
@@ -23,7 +23,7 @@ install TensorLayer, version above 2.0.1: https://github.com/tensorlayer/tensorl
 ### usage
 Refer to example/cifar
 
-prepare some pics for quant, put into cifar_dataset floder
+prepare some pics for quant, put into cifar_dataset folder
 
 prepare the model you need convert to kmodel: cifar10.h5
 
@@ -65,7 +65,7 @@ Their result is close, but still need optimize quant.
 add your Layer class in edge_layer.py
 
 ## How to add new platform support
-make new floder like 'stm32', and write stm32_constant.py,  stm32_layer.py(optimize  ops for stm32 layers), stm32_xxxmodel_bin.py.
+make new folder like 'stm32', and write stm32_constant.py,  stm32_layer.py(optimize  ops for stm32 layers), stm32_xxxmodel_bin.py.
 
 ## Files Description
 ### edge_model.py

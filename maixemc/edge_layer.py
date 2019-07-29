@@ -48,21 +48,19 @@ def flaot2bytes(f):
 
 #buf_map,:[buf_size, pingpong_flag, last_addr]
 def cal_in_out_addr(buf_map, outsize):
-    bufsize         = buf_map[0]
-    pingpong_flag   = buf_map[1]
-    last_addr       = buf_map[2]
+    bufsize         = buf_map['bufsize']
+    pingpong_flag   = buf_map['pingpong']
+    last_addr       = buf_map['last_addr']
     if outsize == 0:
-        logging.debug("outsize==0, no need buf")
+        logging.info("outsize==0, no need buf")
         return buf_map,last_addr,last_addr
-    if pingpong_flag == 0:
-        in_addr = last_addr
-        out_addr = 0
-    else:
-        in_addr = last_addr
-        out_addr = bufsize-outsize
-    buf_map[1] = 1 - buf_map[1]
-    buf_map[2] = out_addr
-    logging.debug("buf_size=%x, outsize=%x, in_addr=%x, out_addr=%x"%(bufsize, outsize, in_addr,out_addr))
+        
+    in_addr = last_addr
+    out_addr = (0 if last_addr!=0 else bufsize-outsize)
+    
+    buf_map['pingpong'] = 1 - buf_map['pingpong']
+    buf_map['last_addr'] = out_addr
+    logging.info("buf_size=%x, outsize=%x, in_addr=%x, out_addr=%x"%(bufsize, outsize, in_addr,out_addr))
     return buf_map, in_addr,out_addr
 
 ################################################################################
@@ -91,7 +89,7 @@ class Quant_Layer:
         self.scale, self.bias = min_max_to_scale_bias(minv, maxv)
         self.memsize    = self.count*(4+1)
         self.outsize    = self.count
-        logging.debug("###quant layer: count=%d, sclale=%f, bias=%f"%(self.count,self.scale,self.bias))
+        logging.info("###quant layer: count=%d, sclale=%f, bias=%f"%(self.count,self.scale,self.bias))
     def to_kmodel(self, arg_oft, eight_bit_mode, buf_map):
         cparser = cstruct.cstruct()
         cparser.load(kmodel_def)
@@ -128,13 +126,18 @@ class DeQuant_Layer:
         shape           = layer._nodes[0].out_tensors[0].shape
         self.count      = get_tensor_size(shape)
         
+        if (self.count > 256*1024):
+            logging.warn("output>1MB data, we assume it is dbg usage, cut to 1MB")
+            self.count = 256*1024
+        
         minv, maxv, _   = quant_func(network, layer, dataset)
         self.scale, self.bias = min_max_to_scale_bias(minv, maxv)
         self.memsize    = self.count*(4+1)
         self.outsize    = self.count*4
-        logging.debug("###dequant layer: count=%d, sclale=%f, bias=%f"%(self.count,self.scale,self.bias))
+
+        logging.info("###dequant layer: count=%d, sclale=%f, bias=%f"%(self.count,self.scale,self.bias))
     def to_kmodel(self, arg_oft, eight_bit_mode, buf_map):
-        logging.debug(buf_map)
+        logging.info(buf_map)
         cparser = cstruct.cstruct()
         cparser.load(kmodel_def)
         layer_header = cparser.kpu_model_layer_header_t()
@@ -158,6 +161,7 @@ def gen_dequant_layer(network, idx, tl_type_list, meta_info):
     if meta_info['is_quant'] == False:
         raise RuntimeError("not support float gen_dequant_layer yet !")
     else:   #quant
+        meta_info['is_quant'] = False
         el_layer = DeQuant_Layer(network, idx, meta_info['quant_func'], meta_info['dataset'])
         return [el_layer], meta_info
 
@@ -175,7 +179,7 @@ class GAP2D_Layer:
         self.channels   = shape[3]
         self.memsize    = self.kernel_size*self.channels*4+self.channels*4
         self.outsize    = self.channels*4
-        logging.debug("GAP2D_Layer: kernel_size %d, channels %d"%(
+        logging.info("GAP2D_Layer: kernel_size %d, channels %d"%(
             self.kernel_size, self.channels))
     def to_kmodel(self, arg_oft, eight_bit_mode, buf_map):
         cparser = cstruct.cstruct()
@@ -218,7 +222,7 @@ class QuantReshape_Layer:
         layer = network.all_layers[idx]
         shape = layer._nodes[0].out_tensors[0].shape
         self.shape = shape
-        logging.debug("QuantReshape_Layer: shape to {}".format(shape))
+        logging.info("QuantReshape_Layer: shape to {}".format(shape))
         
 class Reshape_Layer:
     def __init__(self, network, idx):
@@ -227,7 +231,7 @@ class Reshape_Layer:
         layer = network.all_layers[idx]
         shape = layer._nodes[0].out_tensors[0].shape
         self.shape = shape
-        logging.debug("Reshape_Layer: shape to {}".format(shape))
+        logging.info("Reshape_Layer: shape to {}".format(shape))
 
         
         
@@ -258,7 +262,7 @@ class QuantFlatten_Layer:
         self.shape = shape.as_list()
         self.memsize = self.shape[1]*self.shape[2]*self.shape[3]
         self.outsize = self.shape[1]*self.shape[2]*self.shape[3]
-        logging.debug("Flatten_Layer: w %d, h %d, ch %d"%(
+        logging.info("Flatten_Layer: w %d, h %d, ch %d"%(
             self.shape[1], self.shape[2], self.shape[3]))
     def to_kmodel(self, arg_oft, eight_bit_mode, buf_map):
         cparser = cstruct.cstruct()
@@ -318,7 +322,7 @@ class QuantMaxPool2D_Layer:
         self.memsize = self.in_shape[1]*self.in_shape[2]*self.in_shape[3]+\
             self.out_shape[1]*self.out_shape[2]*self.out_shape[3]
         self.outsize = self.out_shape[1]*self.out_shape[2]*self.out_shape[3]
-        logging.debug("QuantMaxPool2D_Layer: in {} , out {}, kernel {}, stride {}".format(
+        logging.info("QuantMaxPool2D_Layer: in {} , out {}, kernel {}, stride {}".format(
             self.in_shape, self.out_shape, filter_size, strides))
     def to_kmodel(self, arg_oft, eight_bit_mode, buf_map):
         cparser = cstruct.cstruct()
@@ -378,14 +382,14 @@ class FullyConnected_Layer:
         self.out_channels   = out_shape[1]
         if act not in act_table:
             raise RuntimeError("FullyConnected_Layer not support %s now!"%act)
-        logging.debug("act=%s"%act)
+        logging.info("act=%s"%act)
         self.act            = act_table[act]
         self.W              = layer.W.numpy()
         self.b              = layer.b.numpy()
         
         self.memsize = self.in_channels*4 + self.out_channels*4
         self.outsize = self.out_channels*4
-        logging.debug("FullyConnected_Layer: in %d , out %d"%(self.in_channels, self.out_channels))
+        logging.info("FullyConnected_Layer: in %d , out %d"%(self.in_channels, self.out_channels))
     def to_kmodel(self, arg_oft, eight_bit_mode, buf_map):
         cparser = cstruct.cstruct()
         cparser.load(kmodel_def)
@@ -413,8 +417,8 @@ class FullyConnected_Layer:
         layer_header.type               = self.type
         layer_header.body_size          = len(layer_bin)
         # header, bin, memsize, (s,b)
-        #logging.debug(layer_body)
-        #logging.debug(layer_body.dumps())
+        #logging.info(layer_body)
+        #logging.info(layer_body.dumps())
         return layer_header, layer_bin, buf_map, (0, 0)
 
 
@@ -446,7 +450,7 @@ class Upload_Layer:
         
         self.memsize = self.width*self.height*self.channels
         self.outsize = 0
-        logging.debug("Upload_Layer: WxHxC=%dx%dx%d"%(self.width, self.height, self.channels))
+        logging.info("Upload_Layer: WxHxC=%dx%dx%d"%(self.width, self.height, self.channels))
     def to_kmodel(self, arg_oft, eight_bit_mode, buf_map):
         cparser = cstruct.cstruct()
         cparser.load(kmodel_def)
@@ -474,6 +478,47 @@ def gen_upload_layer(network, idx, tl_type_list, meta_info):
         return [dequant_layer], meta_info
     else:   #quant
         raise RuntimeError("only support upload quant data to ai ram!")
+
+
+################################################################################
+class SoftMax_Layer:
+    def __init__(self, network, idx):
+        logging.info("### init Upload_Layer")
+        #KLA_LINEAR = 0,KLA_RELU = 1,KLA_RELU6 = 2 
+        self.type           = EL_SOFTMAX
+        self.typename       = "EL_SOFTMAX"
+        layer = network.all_layers[idx]
+        shape = layer._nodes[0].out_tensors[0].shape.as_list()
+        if len(shape)      != 2:
+            raise RuntimeError("only support 1-D softmax now!")
+        self.channels       = shape[1]
+        self.memsize        = self.channels*4*2
+        self.outsize        = self.channels*4
+        logging.info("SoftMax: channels=%d"%(self.channels))
+    def to_kmodel(self, arg_oft, eight_bit_mode, buf_map):
+        cparser = cstruct.cstruct()
+        cparser.load(kmodel_def)
+        layer_header = cparser.kpu_model_layer_header_t()
+        layer_body = cparser.kpu_model_softmax_layer_argument_t()    
+        # fill layer body
+        layer_body.flags                = 0
+        buf_map, layer_body.main_mem_in_address, layer_body.main_mem_out_address = \
+                                        cal_in_out_addr(buf_map, self.outsize)     
+        layer_body.channels             =self.channels     
+        # fill header
+        layer_header.type               = self.type
+        layer_header.body_size          = len(layer_body)
+
+        return layer_header, layer_body.dumps(), buf_map, (0, 0)
+
+def gen_softmax_layer(network, idx, tl_type_list, meta_info):
+    meta_info['is_inai'] = True   #not in ai ram now
+    if meta_info['is_quant']:
+        raise RuntimeError("only support float data softmax now!")
+    else:   #quant
+        softmax_layer = SoftMax_Layer(network, idx)
+        return [softmax_layer], meta_info
+
 
 ################################################################################
 class Quant_Conv_Layer:
@@ -570,8 +615,6 @@ def gen_requant_layer(network, idx, tl_type_list, meta_info):
     raise RuntimeError("not support gen_requant_layer yet !")
 def gen_l2norm_layer(network, idx, tl_type_list, meta_info):
     raise RuntimeError("not support gen_l2norm_layer yet !")
-def gen_softmax_layer(network, idx, tl_type_list, meta_info):
-    raise RuntimeError("not support gen_softmax_layer yet !")
 def gen_concat_layer(network, idx, tl_type_list, meta_info):
     raise RuntimeError("not support gen_concat_layer yet !")
 def gen_quant_concat_layer(network, idx, tl_type_list, meta_info):

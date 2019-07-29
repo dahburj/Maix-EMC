@@ -55,30 +55,35 @@ from .edge_layer import *
 from .edge_quant import quant_func_valid,quant_func_byname
 from .edge_dataloader import loader_func_valid, loader_func_byname
 
-from .k210.k210_layer import gen_k210_conv_layer
+from .k210.k210_layer import gen_k210_conv_layer, k210_layer_post_fix
 from .k210.k210_kmodel_bin import gen_kmodel
    
 
 tl_to_k210_table= {
 #   TL layer class          layer_generator     merge
-    'Dense'                 :[gen_fc_layer,         []] ,
-    'Flatten'               :[gen_flatten_layer,    []] ,
-    'Reshape'               :[None,                 []] ,
-    'GlobalMaxPool2d'       :[gen_gmaxpool2d_layer, []] ,
-    'GlobalMeanPool2d'      :[gen_gavgpool2d_layer, []] ,
-    'MaxPool2d'             :[gen_maxpool2d_layer,  []] ,
-    'MeanPool2d'            :[gen_avgpool2d_layer,  []] ,
-    'Concat'                :[gen_concat_layer,     []] ,
-    'Conv2d'                :[gen_k210_conv_layer,  [['BatchNorm'],]] ,
-    'DepthwiseConv2d'       :[gen_k210_conv_layer,  [['BatchNorm'],]] ,
-    'DummyDequant'          :[gen_dequant_layer,    []] ,  
+    'Dense'                 :[gen_fc_layer,         [[],]] ,
+    'Flatten'               :[gen_flatten_layer,    [[],]] ,
+    'Reshape'               :[None,                 [[],]] ,
+    'GlobalMaxPool2d'       :[gen_gmaxpool2d_layer, [[],]] ,
+    'GlobalMeanPool2d'      :[gen_gavgpool2d_layer, [[],]] ,
+    'MaxPool2d'             :[gen_maxpool2d_layer,  [[],]] ,
+    'MeanPool2d'            :[gen_avgpool2d_layer,  [[],]] ,
+    'Concat'                :[gen_concat_layer,     [[],]] ,
+    'Conv2d'                :[gen_k210_conv_layer,  [[], ['BatchNorm'],]] ,
+    'DepthwiseConv2d'       :[gen_k210_conv_layer,  [[], ['BatchNorm'],]] ,
+    'ZeroPad2d'             :[gen_k210_conv_layer,  [['Conv2d'], \
+                                                     ['Conv2d', 'BatchNorm'], \
+                                                     ['DepthwiseConv2d'], \
+                                                     ['DepthwiseConv2d', 'BatchNorm']]] ,
+    'DummyDequant'          :[gen_dequant_layer,    [[],]] ,  
+    'SoftMax'               :[gen_softmax_layer,    [[],]] ,  
 }
 
 
 
 platform_table = {
-#   platform       tl layer convertor   model generator
-    'k210'      :   [tl_to_k210_table, gen_kmodel]
+#   platform       tl layer convertor   model generator     post_fix_func
+    'k210'      :   [tl_to_k210_table, gen_kmodel,      k210_layer_post_fix]
     #'stm32'    :   gen_stm32_layer_func_table,
 } 
 
@@ -102,6 +107,7 @@ def try_match_layer_type(layers, idx, match_table):
         #try all layer list belong to this k210 layer type
         for tl_type_list in  tl_type_lists:    
             if len(tl_type_list) == 0:
+                list_result.append(tl_type_list)
                 continue
             match_flag = True
             for i in range(len(tl_type_list)):  #match tl layer type in list
@@ -113,7 +119,7 @@ def try_match_layer_type(layers, idx, match_table):
             if match_flag:
                 list_result.append(tl_type_list)
         if len(list_result) == 0:               #no match tl layer type list
-            return gen_func, [tl_type]
+            return None, []
             
         max_len_idx = 0
         max_len = 0
@@ -122,13 +128,14 @@ def try_match_layer_type(layers, idx, match_table):
                 max_len = len(list_result[i])
                 max_len_idx = i                 #return max len match result
         tl_type_list = [tl_type]
-        tl_type_list.extend(list_result[max_len_idx])
+        if max_len != 0:
+            tl_type_list.extend(list_result[max_len_idx])
         return gen_func, tl_type_list
     else:
         return None, []
 
 
-# gen layer list logging.debug
+# gen layer list logging.info
 def gen_tl_type_list(layers, idx):
     type_list=[]
     for i in range(idx, len(layers)):
@@ -153,7 +160,7 @@ def gen_edge_layer_from_network(network, platform, meta_info, idx):
         logging.error("[*] This layer sequence not support: {}".format(type_list))
         raise RuntimeError("not support this layer sequence !")
         
-    logging.debug("This layerlist len = %d"%(len(tl_type_list)))
+    logging.info("This layerlist len = %d"%(len(tl_type_list)))
     for i in range(len(tl_type_list)):
         logging.info("[TL layer %d]: %s"%(idx+i, network.all_layers[idx+i].layer_args['name']))
     
@@ -168,12 +175,12 @@ def gen_edge_layer_from_network(network, platform, meta_info, idx):
     return el_layers, idx+len(tl_type_list), meta_info
 
 # combine duplicate layers  
-def optimize_layers(el_list):
-    logging.debug(' ')
-    logging.debug(' ')
-    logging.debug('='*27+'Layer List before optimize'+'='*27)
+def post_fix_layers(el_list, platform_fix_func):
+    logging.info(' ')
+    logging.info(' ')
+    logging.info('='*27+'Layer List before fix'+'='*27)
     for i in range(len(el_list)):
-        logging.debug("Layer %3d: %s"%(i,el_list[i].typename))
+        logging.info("Layer %3d: %s"%(i,el_list[i].typename))
     
     if len(el_list) <= 1:
         return
@@ -187,14 +194,17 @@ def optimize_layers(el_list):
            el_list.remove(el_list[i])
            continue
         i += 1
+        
+    platform_fix_func(el_list)
 
-    logging.debug('='*27+'Layer List after optimize '+'='*27)
+    logging.info('='*27+'Layer List after fix '+'='*27)
     for i in range(len(el_list)):
-        logging.debug("Layer %3d: %s"%(i,el_list[i].typename))
-    logging.debug('='*80)
+        logging.info("Layer %3d: %s"%(i,el_list[i].typename))
+    logging.info('='*80)
+    return el_list
     
 #gen edge layers info
-def gen_edge_layers_from_network(network, platform, dataset, quant_func, quant_bit=8):
+def gen_edge_layers_from_network(network, platform, dataset, quant_func, quant_bit=8, sm_flag=False):
     logging.info("====================start gen_edge_layers_from_network==========================")
     layers = network.config['model_architecture']
     layer_length = len(layers)
@@ -227,15 +237,21 @@ def gen_edge_layers_from_network(network, platform, dataset, quant_func, quant_b
             network, platform, meta_info, index
         )
         el_list.extend(cur_edge_layer)  
-    #last layer add DEQUANTIZE
+    # last layer add DEQUANTIZE
     if platform not in platform_table:
         raise RuntimeError("not support this platform !")
     match_table = platform_table[platform][0]
     gen_layer_func = match_table['DummyDequant'][0]
     el_layer, _ = gen_layer_func(network,layer_length-1, None, meta_info)
     el_list.extend(el_layer)  
+    # add optional softmax layer
+    if sm_flag:
+        gen_layer_func = match_table['SoftMax'][0]
+        el_layer, _ = gen_layer_func(network,layer_length-1, None, meta_info)
+        el_list.extend(el_layer) 
     
-    optimize_layers(el_list)
+    platform_fix_func = platform_table[platform][2]
+    el_list = post_fix_layers(el_list, platform_fix_func)
     logging.info("======================end gen_edge_layers_from_network==========================")
     return el_list
 
@@ -245,15 +261,15 @@ def gen_edge_layers_from_network(network, platform, dataset, quant_func, quant_b
 
 def available_platform():
     for item in platform_table:
-        logging.debug("######"+item)
-        logging.debug("support layer type:")
+        logging.info("######"+item)
+        logging.info("support layer type:")
         table = platform_table[item][0]
         for layer in table:
-            logging.debug(layer)
+            logging.info(layer)
 
 
 # gen edge model from network
-def gen_edge_model(network, platform, version, dataset_dir, dataset_func, quant_func, quant_bit):
+def gen_edge_model(network, platform, version, dataset_dir, dataset_func, quant_func, quant_bit, sm_flag):
     if platform not in platform_table:
         raise RuntimeError("unsupport platform!")
     
@@ -284,7 +300,7 @@ def gen_edge_model(network, platform, version, dataset_dir, dataset_func, quant_
     # generate edge layers
     edge_layers = gen_edge_layers_from_network(
         network, platform, 
-        dataset_val, quant_func, quant_bit,
+        dataset_val, quant_func, quant_bit, sm_flag
     )
 
     # generate model for edge device
@@ -295,7 +311,7 @@ def gen_edge_model(network, platform, version, dataset_dir, dataset_func, quant_
     return output_model
  
  
-def save_kmodel(network, filepath, dataset_dir, dataset_func='img_0_1', quant_func='minmax', quant_bit=8, version=3):
+def save_kmodel(network, filepath, dataset_dir, dataset_func='img_0_1', quant_func='minmax', quant_bit=8, version=3, sm_flag=False):
     if network.outputs is None:
         raise RuntimeError("save_kmodel_graph not support dynamic mode yet")
 
@@ -303,7 +319,7 @@ def save_kmodel(network, filepath, dataset_dir, dataset_func='img_0_1', quant_fu
         filepath, dataset_dir, quant_func, quant_bit, version))
 
     try:
-        output_kmodel = gen_edge_model(network, 'k210', version, dataset_dir, dataset_func, quant_func, quant_bit)
+        output_kmodel = gen_edge_model(network, 'k210', version, dataset_dir, dataset_func, quant_func, quant_bit, sm_flag)
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         with open(filepath, 'wb') as of:
             of.write(output_kmodel)
